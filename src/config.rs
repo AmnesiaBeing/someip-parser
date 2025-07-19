@@ -18,11 +18,11 @@ pub struct Config {
     pub sd_port: u16,
 
     /// 过滤特定 VLAN ID 的数据包（可选）
-    #[arg(short, long)]
+    #[arg(short = 'v', long)] // 保持 vlan 参数简写为 v
     pub vlan: Option<u16>,
 
     /// 输出格式（支持：text、json、yaml，默认：text）
-    #[arg(short, long, default_value_t = String::from("text"))]
+    #[arg(short = 'f', long, default_value_t = String::from("text"))]
     pub output_format: String,
 
     /// 输出文件路径（默认：标准输出）
@@ -30,7 +30,7 @@ pub struct Config {
     pub output_file: Option<PathBuf>,
 
     /// 启用 verbose 模式（显示详细日志）
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(long, action = clap::ArgAction::Count)] // 将 verbose 参数简写改为 V
     pub verbose: u8,
 
     /// 请求超时时间（秒，默认：5）

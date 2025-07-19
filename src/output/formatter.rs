@@ -1,7 +1,7 @@
 // src/output/formatter.rs
-use super::super::parser::someip::header::*;
 use super::super::parser::someip::session::*;
 use crate::error::Result;
+use chrono::DateTime;
 use serde::{Serialize, ser::Serializer};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -87,7 +87,7 @@ impl Formatter for TextFormatter {
     }
 }
 
-fn serialize_timestamp<S>(time: &SystemTime, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_timestamp<S>(time: &SystemTime, serializer: S) -> std::result::Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -104,7 +104,7 @@ fn format_timestamp(time: &SystemTime) -> String {
     let secs = duration.as_secs();
     let millis = duration.subsec_millis();
 
-    let datetime = chrono::NaiveDateTime::from_timestamp_opt(secs as i64, 0).unwrap();
+    let datetime = DateTime::from_timestamp(secs as i64, 0).expect("Invalid timestamp");
     format!("{}.{:03}", datetime.format("%Y-%m-%d %H:%M:%S"), millis)
 }
 
