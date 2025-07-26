@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
+use std::net::IpAddr;
 use std::path::Path;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,7 +101,7 @@ pub struct Field {
 pub struct Matrix {
     service_id_to_name: HashMap<u16, String>,
     method_id_to_name: HashMap<(u16, u16), String>,
-    ip_to_name: HashMap<String, String>,
+    ip_to_name: HashMap<IpAddr, String>,
 }
 
 impl Matrix {
@@ -193,8 +194,8 @@ impl Matrix {
         }
     }
 
-    pub fn add_ip_mapping(&mut self, ip: &str, name: &str) {
-        self.ip_to_name.insert(ip.to_string(), name.to_string());
+    pub fn add_ip_mapping(&mut self, ip: &IpAddr, name: &str) {
+        self.ip_to_name.insert(*ip, name.to_string());
     }
 
     pub fn get_service_name(&self, service_id: u16) -> Option<&str> {
@@ -207,7 +208,7 @@ impl Matrix {
             .map(|s| s.as_str())
     }
 
-    pub fn get_ip_name(&self, ip: &str) -> Option<&str> {
+    pub fn get_ip_name(&self, ip: &IpAddr) -> Option<&str> {
         self.ip_to_name.get(ip).map(|s| s.as_str())
     }
 }

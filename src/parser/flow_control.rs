@@ -3,6 +3,7 @@ use super::super::parser::transport_layer::*;
 use crate::error::Result;
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -51,8 +52,8 @@ impl TcpFlowController {
 
     pub fn process_tcp_packet(
         &mut self,
-        src_ip: &str,
-        dst_ip: &str,
+        src_ip: &IpAddr,
+        dst_ip: &IpAddr,
         tcp_packet: &TCPPacketInfo,
         payload: Bytes,
     ) -> Result<Option<Bytes>> {

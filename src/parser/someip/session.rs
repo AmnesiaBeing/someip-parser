@@ -2,6 +2,7 @@
 use super::header::*;
 use crate::error::{Result, SomeIPError};
 use std::collections::{HashMap, VecDeque};
+use std::net::IpAddr;
 use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,8 +17,8 @@ pub struct SomeIPMessage {
     pub timestamp: SystemTime,
     pub header: SomeIPHeader,
     pub payload: Vec<u8>,
-    pub src_ip: String,
-    pub dst_ip: String,
+    pub src_ip: IpAddr,
+    pub dst_ip: IpAddr,
     pub src_port: u16,
     pub dst_port: u16,
 }

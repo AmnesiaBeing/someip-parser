@@ -1,17 +1,14 @@
 // src/parser/transport_layer.rs
 use nom::{
-    IResult,
+    IResult, Parser,
     bytes::complete::take,
     number::complete::{be_u16, be_u32},
-    sequence::tuple,
 };
-use pnet::packet::{ip::IpNextHeaderProtocols, tcp::TcpPacket, udp::UdpPacket};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransportLayer {
     UDP(UDPPacketInfo),
     TCP(TCPPacketInfo),
-    // 其他传输层协议可以在此添加
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,13 +49,10 @@ pub struct TCPFlags {
     pub fin: bool,
 }
 
-pub fn parse_transport_layer(
-    input: &[u8],
-    protocol: pnet::packet::ip::IpNextHeaderProtocol,
-) -> IResult<&[u8], TransportLayer> {
+pub fn parse_transport_layer(input: &[u8], protocol: u8) -> IResult<&[u8], TransportLayer> {
     match protocol {
-        IpNextHeaderProtocols::Udp => parse_udp(input),
-        IpNextHeaderProtocols::Tcp => parse_tcp(input),
+        17 => parse_udp(input),
+        6 => parse_tcp(input),
         _ => Err(nom::Err::Error(nom::error::Error::new(
             input,
             nom::error::ErrorKind::Tag,
@@ -68,7 +62,7 @@ pub fn parse_transport_layer(
 
 fn parse_udp(input: &[u8]) -> IResult<&[u8], TransportLayer> {
     let (input, (src_port, dst_port, length, checksum)) =
-        tuple((be_u16, be_u16, be_u16, be_u16))(input)?;
+        (be_u16, be_u16, be_u16, be_u16).parse(input)?;
 
     let payload = input.to_vec();
 
@@ -86,7 +80,7 @@ fn parse_udp(input: &[u8]) -> IResult<&[u8], TransportLayer> {
 
 fn parse_tcp(input: &[u8]) -> IResult<&[u8], TransportLayer> {
     let (input, (src_port, dst_port, seq_num, ack_num)) =
-        tuple((be_u16, be_u16, be_u32, be_u32))(input)?;
+        (be_u16, be_u16, be_u32, be_u32).parse(input)?;
 
     let (input, data_offset_reserved_flags) = be_u16(input)?;
     let data_offset = ((data_offset_reserved_flags >> 12) & 0x0F) as u8;
@@ -104,7 +98,7 @@ fn parse_tcp(input: &[u8]) -> IResult<&[u8], TransportLayer> {
         fin: (data_offset_reserved_flags & 0x0000) != 0,
     };
 
-    let (input, (window_size, checksum, urgent_ptr)) = tuple((be_u16, be_u16, be_u16))(input)?;
+    let (input, (window_size, checksum, urgent_ptr)) = (be_u16, be_u16, be_u16).parse(input)?;
 
     let options_size = (data_offset * 4 - 20) as usize;
     let (input, options) = if options_size > 0 {

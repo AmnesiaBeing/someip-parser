@@ -2,8 +2,9 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use log::{debug, info, warn};
 use std::io::Write;
-use tokio::sync::mpsc;
+use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
+use tokio::sync::mpsc;
 
 // 导入核心模块
 mod config;
@@ -16,6 +17,7 @@ use config::Config;
 use error::SomeIPError;
 use output::{exporter::Exporter, formatter::*};
 use parser::{
+    flow_control::TcpFlowController,
     link_layer::parse_link_layer,
     network_layer::parse_network_layer,
     pcap_reader::{PCAPReader, RawPacket},
@@ -29,7 +31,6 @@ use parser::{
     },
     transport_layer::parse_transport_layer,
 };
-use utils::flow_control::TcpFlowController;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -76,17 +77,16 @@ async fn main() -> Result<()> {
     // 处理数据包
     let mut messages = Vec::new();
     while let Some(raw_packet) = packet_rx.recv().await {
-        process_raw_packet(
+        let _ = process_raw_packet(
             &raw_packet,
             cli.sd_port,
-            cli.vlan,
             &mut known_ports,
             &mut session_manager,
             &mut tp_parser,
             &mut tcp_flow,
             &matrix,
             &mut messages,
-        )?;
+        );
     }
 
     // 处理超时的会话
@@ -123,7 +123,6 @@ async fn main() -> Result<()> {
 fn process_raw_packet(
     raw_packet: &RawPacket,
     sd_port: u16,
-    target_vlan: Option<u16>,
     known_ports: &mut std::collections::HashSet<u16>,
     session_manager: &mut SessionManager,
     tp_parser: &mut TPParser,
@@ -131,54 +130,44 @@ fn process_raw_packet(
     matrix: &Matrix,
     messages: &mut Vec<SomeIPMessage>,
 ) -> Result<()> {
+    // debug!("处理数据包: {:?}", raw_packet);
+
     // 解析链路层
-    let (_, link_layer) = parse_link_layer(&raw_packet.data)
+    let (payload, link_layer) = parse_link_layer(&raw_packet.data)
         .map_err(|e| SomeIPError::InvalidPacketFormat(format!("链路层解析失败: {}", e)))?;
 
-    // 检查 VLAN 过滤
-    let vlan_id = match &link_layer {
-        parser::link_layer::LinkLayer::Ethernet(eth) => eth.vlan.as_ref().map(|v| v.tci & 0x0FFF),
-        _ => None,
-    };
-    if let (Some(target), Some(actual)) = (target_vlan, vlan_id) {
-        if actual != target {
-            return Ok(()); // 跳过不匹配的 VLAN
-        }
-    }
-
     // 解析网络层
-    let (net_payload, ethertype) = match &link_layer {
-        parser::link_layer::LinkLayer::Ethernet(eth) => (eth.payload.as_slice(), eth.ethertype),
-        parser::link_layer::LinkLayer::SLL(sll) => (sll.payload.as_slice(), sll.protocol),
+    let (link_payload, ethertype) = match &link_layer {
+        parser::link_layer::LinkLayer::Ethernet(eth) => (payload, eth.ethertype),
+        parser::link_layer::LinkLayer::SLL(sll) => (payload, sll.protocol),
     };
-    let (_, network_layer) = parse_network_layer(net_payload, ethertype)
+    let (network_payload, network_layer) = parse_network_layer(link_payload, ethertype)
         .map_err(|e| SomeIPError::InvalidPacketFormat(format!("网络层解析失败: {}", e)))?;
 
     // 提取 IP 地址
-    let (src_ip, dst_ip, transport_payload, protocol) = match &network_layer {
+    let (src_ip, dst_ip, protocol) = match &network_layer {
         parser::network_layer::NetworkLayer::IPv4(ipv4) => (
-            format!(
-                "{}.{}.{}.{}",
-                ipv4.src_ip[0], ipv4.src_ip[1], ipv4.src_ip[2], ipv4.src_ip[3]
-            ),
-            format!(
-                "{}.{}.{}.{}",
-                ipv4.dst_ip[0], ipv4.dst_ip[1], ipv4.dst_ip[2], ipv4.dst_ip[3]
-            ),
-            ipv4.payload.as_slice(),
+            IpAddr::V4(std::net::Ipv4Addr::from(ipv4.src_ip)),
+            IpAddr::V4(std::net::Ipv4Addr::from(ipv4.dst_ip)),
             ipv4.protocol,
         ),
         parser::network_layer::NetworkLayer::IPv6(ipv6) => (
-            format!("{}", std::net::Ipv6Addr::from(ipv6.src_ip)),
-            format!("{}", std::net::Ipv6Addr::from(ipv6.dst_ip)),
-            ipv6.payload.as_slice(),
+            IpAddr::V6(std::net::Ipv6Addr::from(ipv6.src_ip)),
+            IpAddr::V6(std::net::Ipv6Addr::from(ipv6.dst_ip)),
             ipv6.next_header,
         ),
     };
 
+    // debug!("解析数据包: {} -> {}, 协议: {}", src_ip, dst_ip, protocol);
+
     // 解析传输层
-    let (_, transport_layer) = parse_transport_layer(transport_payload, protocol)
+    let (_, transport_layer) = parse_transport_layer(network_payload, protocol)
         .map_err(|e| SomeIPError::InvalidPacketFormat(format!("传输层解析失败: {}", e)))?;
+
+    // debug!(
+    //     "处理数据包: {} -> {}, 协议: {}, 传输层: {:?}",
+    //     src_ip, dst_ip, protocol, transport_layer
+    // );
 
     // 处理 UDP/TCP 数据包
     match &transport_layer {
@@ -335,8 +324,8 @@ fn learn_ports_from_sd(sd_packet: &SDPacket, known_ports: &mut std::collections:
 /// 创建 SomeIP 消息结构
 fn create_someip_message(
     timestamp: &SystemTime,
-    src_ip: &str,
-    dst_ip: &str,
+    src_ip: &IpAddr,
+    dst_ip: &IpAddr,
     src_port: u16,
     dst_port: u16,
     header: parser::someip::header::SomeIPHeader,
@@ -346,8 +335,8 @@ fn create_someip_message(
         timestamp: *timestamp,
         header,
         payload,
-        src_ip: src_ip.to_string(),
-        dst_ip: dst_ip.to_string(),
+        src_ip: *src_ip,
+        dst_ip: *dst_ip,
         src_port,
         dst_port,
     }

@@ -1,16 +1,11 @@
+use log::debug;
 // src/parser/network_layer.rs
 use nom::{
     IResult,
     bytes::complete::take,
-    combinator::{map, opt},
-    number::complete::{be_i8, be_u8, be_u16, be_u32},
-    sequence::{preceded, tuple},
+    number::complete::{be_u8, be_u16, be_u32},
 };
-use pnet::packet::{
-    ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
-    ipv4::Ipv4Packet,
-    ipv6::Ipv6Packet,
-};
+use serde::de;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NetworkLayer {
@@ -29,11 +24,10 @@ pub struct IPv4PacketInfo {
     pub flags: u8,
     pub fragment_offset: u16,
     pub ttl: u8,
-    pub protocol: IpNextHeaderProtocol,
+    pub protocol: u8,
     pub checksum: u16,
     pub src_ip: [u8; 4],
     pub dst_ip: [u8; 4],
-    pub payload: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,11 +36,10 @@ pub struct IPv6PacketInfo {
     pub traffic_class: u8,
     pub flow_label: u32,
     pub payload_length: u16,
-    pub next_header: IpNextHeaderProtocol,
+    pub next_header: u8,
     pub hop_limit: u8,
     pub src_ip: [u8; 16],
     pub dst_ip: [u8; 16],
-    pub payload: Vec<u8>,
 }
 
 pub fn parse_network_layer(input: &[u8], ethertype: u16) -> IResult<&[u8], NetworkLayer> {
@@ -61,6 +54,8 @@ pub fn parse_network_layer(input: &[u8], ethertype: u16) -> IResult<&[u8], Netwo
 }
 
 fn parse_ipv4(input: &[u8]) -> IResult<&[u8], NetworkLayer> {
+    // debug!("Parsing IPv4 packet: {:?}", input);
+
     let (input, version_ihl) = be_u8(input)?;
     let version = version_ihl >> 4;
     let ihl = version_ihl & 0x0F;
@@ -76,18 +71,21 @@ fn parse_ipv4(input: &[u8]) -> IResult<&[u8], NetworkLayer> {
     let fragment_offset = flags_fragment & 0x1FFF;
 
     let (input, ttl) = be_u8(input)?;
-    let (input, protocol_num) = be_u8(input)?;
-    let protocol = IpNextHeaderProtocol(protocol_num);
+    let (input, protocol) = be_u8(input)?;
     let (input, checksum) = be_u16(input)?;
+
+    // debug!("rest input: {:?}", input);
+
     let (input, src_ip) = take(4usize)(input)?;
     let (input, dst_ip) = take(4usize)(input)?;
 
-    let header_length_bytes = ihl * 4;
-    let payload_start = header_length_bytes as usize;
-    let payload = &input[..(total_length as usize - payload_start)];
+    // debug!(
+    //     "Parsed IPv4 packet: src_ip={:?}, dst_ip={:?}",
+    //     src_ip, dst_ip
+    // );
 
     Ok((
-        &[],
+        input,
         NetworkLayer::IPv4(IPv4PacketInfo {
             version,
             header_length: ihl,
@@ -102,7 +100,6 @@ fn parse_ipv4(input: &[u8]) -> IResult<&[u8], NetworkLayer> {
             checksum,
             src_ip: src_ip.try_into().unwrap(),
             dst_ip: dst_ip.try_into().unwrap(),
-            payload: payload.to_vec(),
         }),
     ))
 }
@@ -114,16 +111,13 @@ fn parse_ipv6(input: &[u8]) -> IResult<&[u8], NetworkLayer> {
     let flow_label = version_tc_fl & 0x000FFFFF;
 
     let (input, payload_length) = be_u16(input)?;
-    let (input, next_header_num) = be_u8(input)?;
-    let next_header = IpNextHeaderProtocol(next_header_num);
+    let (input, next_header) = be_u8(input)?;
     let (input, hop_limit) = be_u8(input)?;
     let (input, src_ip) = take(16usize)(input)?;
     let (input, dst_ip) = take(16usize)(input)?;
 
-    let payload = input.to_vec();
-
     Ok((
-        &[],
+        input,
         NetworkLayer::IPv6(IPv6PacketInfo {
             version,
             traffic_class,
@@ -133,7 +127,6 @@ fn parse_ipv6(input: &[u8]) -> IResult<&[u8], NetworkLayer> {
             hop_limit,
             src_ip: src_ip.try_into().unwrap(),
             dst_ip: dst_ip.try_into().unwrap(),
-            payload,
         }),
     ))
 }

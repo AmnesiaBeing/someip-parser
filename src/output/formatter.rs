@@ -119,11 +119,11 @@ pub fn convert_to_formatted(
         timestamp: message.timestamp.into(),
         sender: matrix
             .get_ip_name(&message.src_ip)
-            .unwrap_or(&message.src_ip)
+            .unwrap_or(&message.src_ip.to_string())
             .to_string(),
         receiver: matrix
             .get_ip_name(&message.dst_ip)
-            .unwrap_or(&message.dst_ip)
+            .unwrap_or(&message.dst_ip.to_string())
             .to_string(),
         service: matrix
             .get_service_name(service_id)
